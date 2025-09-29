@@ -8,8 +8,8 @@ from django.contrib.auth.models import User
 from django.utils.http import urlsafe_base64_decode
 from django.utils.encoding import force_str
 from django.contrib.auth.tokens import default_token_generator
-from allauth.account.models import EmailAddress
-from allauth.account.utils import complete_signup
+from allauth.account.utils import setup_user_email
+from django.contrib.auth.models import User
 from allauth.account import app_settings as allauth_settings
 from allauth.account.forms import LoginForm, SignupForm
 from allauth.account.views import LoginView, SignupView
@@ -21,12 +21,19 @@ from rest_framework_simplejwt.authentication import JWTAuthentication
 from .serializers import (
     UserSerializer, LoginSerializer, SignupSerializer,
     PasswordResetSerializer, PasswordResetConfirmSerializer,
-    IoTSerializer, SensorDataSerializer, IoTDataInputSerializer,
-    DataBatchSerializer, DataSessionSerializer, DeviceModelSerializer, StockSerializer, SaleSerializer, IoTSerializer
+    ProfilometreLidarDataSerializer, DeviceModelSerializer, StockSerializer, SaleSerializer, IoTSerializer
 )
 from .models import IoT, SensorData, DataBatch, DataSession, DeviceModel, Stock, Sale
 from datetime import datetime
 import uuid
+from rest_framework.response import Response
+from rest_framework import status
+from django.contrib.auth.models import User
+from allauth.account.models import EmailAddress
+from rest_framework_simplejwt.tokens import RefreshToken
+from allauth.account.models import EmailAddress, EmailConfirmation
+from .models import ProfilometreLidarData
+from .serializers import ProfilometreLidarDataSerializer
 
 @extend_schema(
     tags=['auth'],
@@ -59,47 +66,37 @@ import uuid
 @api_view(['POST'])
 @permission_classes([AllowAny])
 def login_view(request):
-    """API endpoint pour la connexion sécurisée avec allauth"""
     serializer = LoginSerializer(data=request.data)
-    if serializer.is_valid():
-        email = serializer.validated_data['email']
-        password = serializer.validated_data['password']
-        
-        # Utiliser allauth pour l'authentification
-        try:
-            # Vérifier si l'email est vérifié
-            email_address = EmailAddress.objects.get(email=email, primary=True)
-            if not email_address.verified:
-                return Response({
-                    'error': 'Votre email n\'est pas vérifié. Veuillez vérifier votre email avant de vous connecter.'
-                }, status=status.HTTP_400_BAD_REQUEST)
-            
-            user = email_address.user
-        except EmailAddress.DoesNotExist:
-            return Response({
-                'error': 'Aucun utilisateur trouvé avec cet email.'
-            }, status=status.HTTP_400_BAD_REQUEST)
-        
-        # Authentification avec allauth
-        user = authenticate(username=user.username, password=password)
-        if user is not None and user.is_active:
-            # Utiliser allauth pour la connexion
-            perform_login(request, user, allauth_settings.EMAIL_VERIFICATION)
-            
-            # Créer le token
-            token, created = RefreshToken.for_user(user)
-            
-            return Response({
-                'token': token.access_token,
-                'user': UserSerializer(user).data,
-                'message': 'Connexion réussie'
-            })
-        else:
-            return Response({
-                'error': 'Email ou mot de passe incorrect.'
-            }, status=status.HTTP_400_BAD_REQUEST)
-    
-    return Response(serializer.errors, status=status.HTTP_400_BAD_REQUEST)
+    if not serializer.is_valid():
+        return Response(serializer.errors, status=status.HTTP_400_BAD_REQUEST)
+
+    email = serializer.validated_data['email']
+    password = serializer.validated_data['password']
+
+    # Récupérer l'utilisateur via allauth
+    try:
+        email_address = EmailAddress.objects.get(email=email, primary=True)
+        user = email_address.user
+    except EmailAddress.DoesNotExist:
+        return Response({'error': 'Identifiants incorrects.'},
+                        status=status.HTTP_401_UNAUTHORIZED)
+
+    # Vérifier le mot de passe manuellement
+    if not user.check_password(password) or not user.is_active:
+        return Response({'error': 'Identifiants incorrects.'},
+                        status=status.HTTP_401_UNAUTHORIZED)
+
+    # Connexion via allauth
+    perform_login(request, user, allauth_settings.EMAIL_VERIFICATION)
+
+    # Générer le token JWT
+    refresh = RefreshToken.for_user(user)
+    return Response({
+        'token': str(refresh.access_token),
+        'refresh': str(refresh),
+        'user': UserSerializer(user).data,
+        'message': 'Connexion réussie'
+    }, status=status.HTTP_200_OK)
 
 @extend_schema(
     tags=['auth'],
@@ -129,66 +126,51 @@ def login_view(request):
         ),
     ]
 )
+
+
 @api_view(['POST'])
+@authentication_classes([])  # Pas d’auth requis
 @permission_classes([AllowAny])
 def signup_view(request):
-    """API endpoint pour l'inscription sécurisée avec allauth"""
-    serializer = SignupSerializer(data=request.data)
-    if serializer.is_valid():
-        email = serializer.validated_data['email']
-        password = serializer.validated_data['password1']
-        first_name = serializer.validated_data.get('first_name', '')
-        last_name = serializer.validated_data.get('last_name', '')
-        
-        # Vérifier si l'email existe déjà avec allauth
-        if EmailAddress.objects.filter(email=email).exists():
-            return Response({
-                'error': 'Un utilisateur avec cet email existe déjà.'
-            }, status=status.HTTP_400_BAD_REQUEST)
-        
-        # Créer l'utilisateur avec allauth
-        username = email.split('@')[0]  # Utiliser la partie avant @ comme username
-        user = User.objects.create_user(
-            username=username,
-            email=email,
-            password=password,
-            first_name=first_name,
-            last_name=last_name
-        )
-        
-        # Créer l'EmailAddress pour allauth
-        email_address = EmailAddress.objects.create(
-            user=user,
-            email=email,
-            primary=True,
-            verified=False
-        )
-        
-        # Utiliser allauth pour compléter l'inscription
-        adapter = get_adapter(request)
-        complete_signup(request, user, allauth_settings.EMAIL_VERIFICATION, None)
-        
-        # Envoyer le signal d'inscription
-        signals.user_signed_up.send(
-            sender=user.__class__,
-            request=request,
-            user=user
-        )
-        
-        # Connecter l'utilisateur si l'email n'a pas besoin de vérification
-        if allauth_settings.EMAIL_VERIFICATION != 'mandatory':
-            perform_login(request, user, allauth_settings.EMAIL_VERIFICATION)
-        
-        # Créer le token
-        token, created = RefreshToken.for_user(user)
-        
-        return Response({
-            'token': token.access_token,
-            'user': UserSerializer(user).data,
-            'message': 'Inscription réussie. Vérifiez votre email pour confirmer votre compte.'
-        }, status=status.HTTP_201_CREATED)
-    
-    return Response(serializer.errors, status=status.HTTP_400_BAD_REQUEST)
+    data = request.data
+    email = data.get("email")
+    password = data.get("password")
+    username = data.get("username") or email
+    first_name = data.get("first_name", "")
+    last_name = data.get("last_name", "")
+
+    if User.objects.filter(email=email).exists():
+        return Response({"error": "Email déjà utilisé"}, status=status.HTTP_400_BAD_REQUEST)
+
+    # Si tu veux activer directement, mets is_active=True
+    user = User.objects.create_user(
+        username=username,
+        email=email,
+        password=password,
+        first_name=first_name,
+        last_name=last_name,
+        is_active=True  # L'utilisateur est actif tout de suite
+    )
+
+    # Générer le token JWT
+    refresh = RefreshToken.for_user(user)
+
+    return Response({
+        "success": True,
+        "message": "Inscription réussie. Vous êtes connecté.",
+        "user": {
+            "id": user.id,
+            "username": user.username,
+            "email": user.email,
+            "first_name": user.first_name,
+            "last_name": user.last_name,
+        },
+        "tokens": {
+            "access": str(refresh.access_token),
+            "refresh": str(refresh),
+        }
+    }, status=status.HTTP_201_CREATED)
+
 
 @extend_schema(
     tags=['auth'],
@@ -354,6 +336,8 @@ def email_verification(request):
         400: None,
     }
 )
+
+
 @api_view(['POST'])
 @permission_classes([AllowAny])
 def resend_email_verification(request):
@@ -372,10 +356,10 @@ def resend_email_verification(request):
                 'message': 'Email déjà vérifié.'
             }, status=status.HTTP_400_BAD_REQUEST)
         
-        # Renvoyer l'email de vérification
-        adapter = get_adapter(request)
-        adapter.send_confirmation_mail(request, email_address, signup=True)
-        
+        # ✅ Créer une confirmation
+        confirmation = EmailConfirmation.create(email_address)
+        confirmation.send(request)
+
         return Response({
             'message': 'Email de vérification renvoyé avec succès.'
         })
@@ -384,6 +368,7 @@ def resend_email_verification(request):
         return Response({
             'error': 'Aucun utilisateur trouvé avec cet email.'
         }, status=status.HTTP_400_BAD_REQUEST)
+
 
 @extend_schema(
     tags=['auth'],
@@ -475,235 +460,31 @@ def change_password(request):
         'message': 'Mot de passe changé avec succès. Veuillez vous reconnecter.'
     })
 
-@extend_schema(
-    tags=['iot'],
-    summary="Envoi de données IoT avec session",
-    description="API flexible pour recevoir les données de tous les capteurs IoT avec gestion de sessions par utilisateur",
-    request=IoTDataInputSerializer,
-    responses={
-        201: SensorDataSerializer,
-        400: None,
-        401: None,
-    },
-    examples=[
-        OpenApiExample(
-            'Données de capteurs avec session',
-            value={
-                'device_id': 'RASPBERRY_PI_001',
-                'session_id': 'session_2024_01_01_001',
-                'sensor_readings': [
-                    {
-                        'sensor_type': 'temperature',
-                        'value': 25.5,
-                        'unit': '°C'
-                    },
-                    {
-                        'sensor_type': 'humidity',
-                        'value': 65.2,
-                        'unit': '%'
-                    },
-                    {
-                        'sensor_type': 'accelerometer',
-                        'value': 9.81,
-                        'unit': 'm/s²',
-                        'additional_data': {
-                            'x': 0.1,
-                            'y': 0.2,
-                            'z': 9.8
-                        }
-                    }
-                ],
-                'gps_latitude': 48.8566,
-                'gps_longitude': 2.3522,
-                'description': 'Session de test capteurs'
-            },
-            request_only=True,
-            status_codes=['201']
-        ),
-    ]
-)
 @api_view(['POST'])
-def send_iot_data_api_key(request):
+@permission_classes([AllowAny])  # Mets IsAuthenticated si tu veux protéger
+def send_profilometre_lidar_data(request):
     """
-    Envoi de données IoT par l'équipement via clé API (X-API-KEY dans les headers)
+    POST : Crée une nouvelle session Profilomètre+LiDAR
     """
-    api_key = request.headers.get('X-API-KEY')
-    if not api_key:
-        return Response({'error': 'Clé API manquante'}, status=401)
-    try:
-        device = IoT.objects.get(api_key=api_key)
-    except IoT.DoesNotExist:
-        return Response({'error': 'Clé API invalide'}, status=401)
+    serializer = ProfilometreLidarDataSerializer(data=request.data)
+    if serializer.is_valid():
+        serializer.save()
+        return Response(serializer.data, status=201)
+    return Response(serializer.errors, status=400)
 
-    # On suppose que le body est identique à celui de send_iot_data
-    data = request.data
-    session_id = data.get('session_id')
-    sensor_readings = data.get('sensor_readings', [])
-    gps_lat = data.get('gps_latitude')
-    gps_lon = data.get('gps_longitude')
-    timestamp = data.get('timestamp')
-    batch_id = data.get('batch_id')
-    description = data.get('description', '')
-
-    # Créer ou récupérer la session
-    if session_id:
-        session, session_created = DataSession.objects.get_or_create(
-            session_id=session_id,
-            device=device,
-            defaults={
-                'description': description,
-                'is_active': True
-            }
-        )
-    else:
-        session = DataSession.objects.create(
-            session_id=f"session_{datetime.now().strftime('%Y%m%d_%H%M%S')}_{uuid.uuid4().hex[:8]}",
-            device=device,
-            description=description,
-            is_active=True
-        )
-
-    # Créer un lot de données si batch_id fourni
-    data_batch = None
-    if batch_id:
-        data_batch, _ = DataBatch.objects.get_or_create(
-            batch_id=batch_id,
-            session=session,
-            device=device,
-            defaults={'data_count': 0}
-        )
-
-    # Traiter chaque lecture de capteur
-    created_data = []
-    for reading in sensor_readings:
-        sensor_data = SensorData.objects.create(
-            session=session,
-            device=device,
-            sensor_type=reading['sensor_type'],
-            value=reading['value'],
-            unit=reading.get('unit', ''),
-            gps_latitude=gps_lat,
-            gps_longitude=gps_lon,
-            additional_data=reading.get('additional_data', {}),
-            timestamp=timestamp if timestamp else datetime.now()
-        )
-        created_data.append(sensor_data)
-        if data_batch:
-            data_batch.data_count += 1
-            data_batch.save()
-
-    return Response({
-        'message': f'{len(created_data)} lectures de capteurs enregistrées avec succès',
-        'device': IoTSerializer(device).data,
-        'session': DataSessionSerializer(session).data,
-        'data_count': len(created_data),
-        'batch_id': batch_id if data_batch else None
-    }, status=201)
-@extend_schema
 @api_view(['GET'])
-@authentication_classes([JWTAuthentication])
-@permission_classes([IsAuthenticated])
-def get_front_data(request):
-    """Récupérer les données des capteurs IoT de l'utilisateur connecté avec filtres"""
-    try:
-        # Récupérer les paramètres de filtrage
-        device_id = request.GET.get('device_id')
-        session_id = request.GET.get('session_id')
-        sensor_type = request.GET.get('sensor_type')
-        limit = request.GET.get('limit', 100)
-        start_date = request.GET.get('start_date')
-        end_date = request.GET.get('end_date')
-        
-        # Construire la requête - FILTRER PAR UTILISATEUR CONNECTÉ
-        queryset = SensorData.objects.filter(device__user=request.user)
-        
-        if device_id:
-            queryset = queryset.filter(device__device_id=device_id)
-        
-        if session_id:
-            queryset = queryset.filter(session__session_id=session_id)
-        
-        if sensor_type:
-            queryset = queryset.filter(sensor_type=sensor_type)
-        
-        if start_date:
-            queryset = queryset.filter(timestamp__date__gte=start_date)
-        
-        if end_date:
-            queryset = queryset.filter(timestamp__date__lte=end_date)
-        
-        # Limiter les résultats
-        try:
-            limit = int(limit)
-            queryset = queryset[:limit]
-        except ValueError:
-            queryset = queryset[:100]
-        
-        # Sérialiser les données
-        serializer = SensorDataSerializer(queryset, many=True)
-        
-        return Response({
-            'data': serializer.data,
-            'count': len(serializer.data),
-            'user': request.user.email,
-            'filters_applied': {
-                'device_id': device_id,
-                'session_id': session_id,
-                'sensor_type': sensor_type,
-                'limit': limit,
-                'start_date': start_date,
-                'end_date': end_date
-            }
-        })
-        
-    except Exception as e:
-        return Response({
-            'error': f'Erreur lors de la récupération des données: {str(e)}'
-        }, status=status.HTTP_400_BAD_REQUEST)
+@permission_classes([AllowAny])  # Mets IsAuthenticated si tu veux protéger
+def list_profilometre_lidar_data(request):
+    """
+    GET : Liste toutes les sessions Profilomètre+LiDAR
+    """
+    queryset = ProfilometreLidarData.objects.all().order_by('-timestamp')
+    user_id = request.GET.get('user_id')
+    if user_id:
+        queryset = queryset.filter(user_id=user_id)
+    serializer = ProfilometreLidarDataSerializer(queryset, many=True)
+    return Response(serializer.data)
 
-@extend_schema(
-    tags=['iot'],
-    summary="Récupération des sessions IoT",
-    description="Récupérer toutes les sessions de collecte de données de l'utilisateur connecté",
-    parameters=[
-        OpenApiParameter(name='device_id', description='ID de l\'équipement', required=False, type=str),
-        OpenApiParameter(name='is_active', description='Sessions actives uniquement', required=False, type=bool),
-    ],
-    responses={
-        200: DataSessionSerializer,
-        400: None,
-    }
-)
-@api_view(['GET'])
-@authentication_classes([JWTAuthentication])
-@permission_classes([IsAuthenticated])
-def get_iot_sessions(request):
-    """Récupérer les sessions de collecte de données de l'utilisateur connecté"""
-    try:
-        device_id = request.GET.get('device_id')
-        is_active = request.GET.get('is_active')
-        
-        # Construire la requête - FILTRER PAR UTILISATEUR CONNECTÉ
-        queryset = DataSession.objects.filter(device__user=request.user)
-        
-        if device_id:
-            queryset = queryset.filter(device__device_id=device_id)
-        
-        if is_active is not None:
-            queryset = queryset.filter(is_active=is_active.lower() == 'true')
-        
-        serializer = DataSessionSerializer(queryset, many=True)
-        
-        return Response({
-            'sessions': serializer.data,
-            'count': len(serializer.data),
-            'user': request.user.email
-        })
-        
-    except Exception as e:
-        return Response({
-            'error': f'Erreur lors de la récupération des sessions: {str(e)}'
-        }, status=status.HTTP_400_BAD_REQUEST)
 
 class IsVendeur(permissions.BasePermission):
     def has_permission(self, request, view):

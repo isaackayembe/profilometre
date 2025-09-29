@@ -1,6 +1,6 @@
 from django.urls import path, include
 from . import views
-from .views import DeviceModelViewSet, StockViewSet, SaleViewSet
+from .views import DeviceModelViewSet, StockViewSet, SaleViewSet, list_profilometre_lidar_data, send_profilometre_lidar_data
 
 app_name = 'backapp'
 
@@ -20,16 +20,13 @@ urlpatterns = [
     path('api/auth/change-password/', views.change_password, name='api_change_password'),
     
     # IoT Data endpoints - Une seule API flexible pour tous les capteurs
-    path('api/iot/send-data/', views.send_iot_data_api_key, name='api_send_iot_data_api_key'),
-    path('api/front/get-data/', views.get_front_data, name='get_front_data'),
-    path('api/iot/sessions/', views.get_iot_sessions, name='api_iot_sessions'),
+    path('profilometre-lidar/', send_profilometre_lidar_data, name='profilometre_lidar_post'),
+    path('profilometre-lidar/list/', list_profilometre_lidar_data, name='profilometre_lidar_list'),
 
     path('api/modeles/', DeviceModelViewSet.as_view({'get': 'list', 'post': 'create'}), name='device-model-list'),
     path('api/modeles/<int:pk>/', DeviceModelViewSet.as_view({'get': 'retrieve', 'put': 'update', 'patch': 'partial_update', 'delete': 'destroy'}), name='device-model-detail'),
-
     path('api/stocks/', StockViewSet.as_view({'get': 'list', 'post': 'create'}), name='stock-list'),
     path('api/stocks/<int:pk>/', StockViewSet.as_view({'get': 'retrieve', 'put': 'update', 'patch': 'partial_update', 'delete': 'destroy'}), name='stock-detail'),
-
     path('api/ventes/', SaleViewSet.as_view({'get': 'list', 'post': 'create'}), name='sale-list'),
     path('api/ventes/<int:pk>/', SaleViewSet.as_view({'get': 'retrieve', 'put': 'update', 'patch': 'partial_update', 'delete': 'destroy'}), name='sale-detail'),
 ]

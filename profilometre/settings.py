@@ -144,10 +144,10 @@ AUTHENTICATION_BACKENDS = [
 ]
 
 # Django REST Framework Configuration
+# Django REST Framework Configuration
 REST_FRAMEWORK = {
     'DEFAULT_AUTHENTICATION_CLASSES': [
-    'rest_framework_simplejwt.authentication.JWTAuthentication',  # JWT au lieu de Token
-#'rest_framework.authentication.SessionAuthentication',
+        'rest_framework_simplejwt.authentication.JWTAuthentication',
     ],
     'DEFAULT_PERMISSION_CLASSES': [
         'rest_framework.permissions.IsAuthenticated',
@@ -155,7 +155,13 @@ REST_FRAMEWORK = {
     'DEFAULT_PAGINATION_CLASS': 'rest_framework.pagination.PageNumberPagination',
     'PAGE_SIZE': 10,
     'DEFAULT_SCHEMA_CLASS': 'drf_spectacular.openapi.AutoSchema',
+
+    # 👇 Forcer uniquement du JSON (pas de HTML browsable API)
+    'DEFAULT_RENDERER_CLASSES': [
+        'rest_framework.renderers.JSONRenderer',
+    ],
 }
+
 
 # Configuration SimpleJWT
 from datetime import timedelta
@@ -215,7 +221,7 @@ SPECTACULAR_SETTINGS = {
 }
 
 # Allauth settings (mise à jour pour éviter les avertissements de dépréciation)
-EMAIL_BACKEND = 'django.core.mail.backends.smtp.EmailBackend'
+#EMAIL_BACKEND = 'django.core.mail.backends.smtp.EmailBackend'
 EMAIL_HOST = 'smtp.gmail.com'
 EMAIL_PORT = 587
 EMAIL_USE_TLS = True
@@ -223,7 +229,7 @@ EMAIL_HOST_USER = 'isaackayembe44@gmail.com'
 EMAIL_HOST_PASSWORD = 'rxvk zqbn gvro ijjg'
 
 # Email settings (console pour voir les emails dans le terminal)
-#EMAIL_BACKEND = 'django.core.mail.backends.console.EmailBackend'
+EMAIL_BACKEND = 'django.core.mail.backends.console.EmailBackend'
 
 # Login/Logout URLs
 LOGIN_REDIRECT_URL = '/'
@@ -250,7 +256,17 @@ CORS_ALLOWED_ORIGINS = [
     "http://127.0.0.1:4200",
     "http://localhost:8000",  # Django development server
     "http://127.0.0.1:8000",
-    # Ajoutez ici les domaines de votre équipe
+    "http://localhost:3000",  # React development server
+    "http://127.0.0.1:3000",
+    "http://localhost:3001",  # Next.js development server (AJOUTEZ CETTE LIGNE)
+    "http://127.0.0.1:3001", # Next.js development server (AJOUTEZ CETTE LIGNE)
+    "http://localhost:8080",  # Vue.js development server
+    "http://127.0.0.1:8080",
+    "http://localhost:4200",  # Angular development server
+    "http://127.0.0.1:4200",
+    "http://localhost:8000",  # Django development server
+    "http://127.0.0.1:8000",
+ # Ajoutez ici les domaines de votre équipe
     # "https://votre-frontend.com",
     # "https://votre-wordpress.com",
 ]

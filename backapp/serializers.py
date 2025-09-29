@@ -1,6 +1,6 @@
 from rest_framework import serializers
 from django.contrib.auth.models import User
-from .models import IoT, SensorData, DataBatch, DataSession, DeviceModel, Stock, Sale
+from .models import IoT, ProfilometreLidarData, SensorData, DataBatch, DataSession, DeviceModel, Stock, Sale
 
 class UserSerializer(serializers.ModelSerializer):
     class Meta:
@@ -57,19 +57,31 @@ class SensorDataSerializer(serializers.ModelSerializer):
         fields = ['id', 'session', 'session_id', 'device', 'device_name', 'sensor_type', 'value', 'unit', 'timestamp', 
                  'gps_latitude', 'gps_longitude', 'additional_data']
 
-class IoTDataInputSerializer(serializers.Serializer):
-    """Sérialiseur pour recevoir les données IoT de manière flexible avec session"""
-    device_id = serializers.CharField(help_text="ID unique de l'équipement IoT")
-    session_id = serializers.CharField(required=False, help_text="ID de la session (optionnel, créé automatiquement si non fourni)")
-    sensor_readings = serializers.ListField(
-        child=serializers.DictField(),
-        help_text="Liste des lectures de capteurs"
-    )
-    gps_latitude = serializers.FloatField(required=False, help_text="Latitude GPS")
-    gps_longitude = serializers.FloatField(required=False, help_text="Longitude GPS")
-    timestamp = serializers.DateTimeField(required=False, help_text="Horodatage des mesures")
-    batch_id = serializers.CharField(required=False, help_text="ID du lot de données")
-    description = serializers.CharField(required=False, help_text="Description de la session")
+
+class ProfilometreLidarDataSerializer(serializers.ModelSerializer):
+    class Meta:
+        model = ProfilometreLidarData
+        fields = [
+            'id',
+            'user_id',
+            'session_id',
+            'timestamp',
+            'json_data',
+            'has_lidar_data',
+            'has_personality_data',
+            'lidar_point_count',
+            'lidar_capture_duration_sec',
+            'created_at',
+            'updated_at',
+        ]
+        read_only_fields = [
+            'has_lidar_data',
+            'has_personality_data',
+            'lidar_point_count',
+            'lidar_capture_duration_sec',
+            'created_at',
+            'updated_at',
+        ]
 
 class SensorReadingSerializer(serializers.Serializer):
     """Sérialiseur pour une lecture de capteur individuelle"""

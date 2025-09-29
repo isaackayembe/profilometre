@@ -92,3 +92,4 @@ VENDOR_USER_PERMISSIONS = [
     'view_own_vendor_data',
 ]
 
+

@@ -1,5 +1,8 @@
 from django.db import models
 from django.contrib.auth.models import User
+from django.utils import timezone
+import json
+
 
 class Vendeur(models.Model):
     user = models.OneToOneField(User, on_delete=models.CASCADE, related_name='vendeur_profile')
@@ -115,3 +118,78 @@ class DataBatch(models.Model):
     data_count = models.IntegerField(default=0)
     created_at = models.DateTimeField(auto_now_add=True)
     def __str__(self): return f"Batch {self.batch_id} - {self.device.name}"
+    
+    
+# models.py — version finale adaptée à votre format LiDAR (x,y,z)
+
+class ProfilometreLidarData(models.Model):
+    """
+    Modèle unique pour stocker :
+    - Données JSON du Profilomètre (psychométriques, comportementales)
+    - Données LiDAR au format {x, y, z, timestamp_sec}
+    - Tout dans un seul JSON, avec extraction intelligente
+    """
+    
+    user_id = models.CharField(
+        max_length=150,
+        db_index=True,
+        help_text="Identifiant unique de l'utilisateur ou du véhicule"
+    )
+    
+    session_id = models.CharField(
+        max_length=200,
+        unique=True,
+        help_text="Identifiant unique de la session (profilomètre + lidar)"
+    )
+    
+    timestamp = models.DateTimeField(
+        default=timezone.now,
+        db_index=True,
+        help_text="Date et heure de la capture (session)"
+    )
+    
+    # JSON principal : contient TOUT
+    json_data = models.JSONField(
+        help_text="Données complètes : profilomètre + lidar (format x,y,z) + metadata"
+    )
+    
+    # Champs extraits pour requêtes rapides
+    has_lidar_data = models.BooleanField(default=False, db_index=True)
+    has_personality_data = models.BooleanField(default=False, db_index=True)
+    lidar_point_count = models.IntegerField(default=0, db_index=True)
+    lidar_capture_duration_sec = models.FloatField(null=True, blank=True)
+    created_at = models.DateTimeField(auto_now_add=True)
+    updated_at = models.DateTimeField(auto_now=True)
+
+    def save(self, *args, **kwargs):
+        # Extraction intelligente
+        profilometre_data = self.json_data.get('profile_data', {})
+        lidar_points = self.json_data.get('lidar_data', [])
+        
+        # Détection de contenu
+        self.has_personality_data = bool(profilometre_data.get('personality_traits'))
+        self.has_lidar_data = isinstance(lidar_points, list) and len(lidar_points) > 0
+        self.lidar_point_count = len(lidar_points) if self.has_lidar_data else 0
+        
+        # Calcul de la durée de capture (si timestamps disponibles)
+        if self.has_lidar_data and len(lidar_points) >= 2:
+            timestamps = [
+                p.get('timestamp_sec') for p in lidar_points
+                if p.get('timestamp_sec') is not None
+            ]
+            if len(timestamps) >= 2:
+                self.lidar_capture_duration_sec = max(timestamps) - min(timestamps)
+        
+        super().save(*args, **kwargs)
+
+    def __str__(self):
+        return f"Session {self.session_id} - User {self.user_id} @ {self.timestamp.strftime('%Y-%m-%d %H:%M')}"
+
+    class Meta:
+        verbose_name = "Donnée Profilomètre + LiDAR (x,y,z)"
+        verbose_name_plural = "Données Profilomètre + LiDAR (x,y,z)"
+        ordering = ['-timestamp']
+        indexes = [
+            models.Index(fields=['user_id', 'timestamp']),
+            models.Index(fields=['has_lidar_data', 'lidar_point_count']),
+        ]
