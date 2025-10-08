@@ -3,121 +3,80 @@ from django.contrib.auth.models import User
 from django.utils import timezone
 import json
 
+# ---------------------------------------------------------
+# 1️⃣ PROFILS D’UTILISATEURS : VENDEUR & CLIENT
+# ---------------------------------------------------------
 
-class Vendeur(models.Model):
+class VendeurProfile(models.Model):
     user = models.OneToOneField(User, on_delete=models.CASCADE, related_name='vendeur_profile')
-    company_name = models.CharField(max_length=200)
-    vendor_id = models.CharField(max_length=50, unique=True)
-    phone = models.CharField(max_length=20, blank=True)
-    address = models.TextField(blank=True)
-    is_verified = models.BooleanField(default=False)
-    commission_rate = models.DecimalField(max_digits=5, decimal_places=2, default=10.00)
-    created_at = models.DateTimeField(auto_now_add=True)
-    updated_at = models.DateTimeField(auto_now=True)
-    def __str__(self): return self.company_name
-
-class DeviceModel(models.Model):
-    vendeur = models.ForeignKey(Vendeur, on_delete=models.CASCADE, related_name='device_models')
-    name = models.CharField(max_length=100)
-    model_number = models.CharField(max_length=50, unique=True)
-    description = models.TextField()
-    price = models.DecimalField(max_digits=10, decimal_places=2)
-    cost_price = models.DecimalField(max_digits=10, decimal_places=2)
-    specifications = models.JSONField(default=dict, blank=True)
-    is_active = models.BooleanField(default=True)
-    created_at = models.DateTimeField(auto_now_add=True)
-    def __str__(self): return self.name
-
-class Stock(models.Model):
-    vendeur = models.ForeignKey(Vendeur, on_delete=models.CASCADE, related_name='stock_items')
-    device_model = models.ForeignKey(DeviceModel, on_delete=models.CASCADE, related_name='stock_items')
-    quantity_available = models.IntegerField(default=0)
-    quantity_reserved = models.IntegerField(default=0)
-    reorder_level = models.IntegerField(default=5)
-    location = models.CharField(max_length=200, blank=True)
-    last_updated = models.DateTimeField(auto_now=True)
-
-    @property
-    def total_quantity(self):
-        return self.quantity_available + self.quantity_reserved
+    entreprise = models.CharField(max_length=100, blank=True, null=True)
+    telephone = models.CharField(max_length=20, blank=True, null=True)
+    adresse = models.CharField(max_length=255, blank=True, null=True)
+    date_creation = models.DateTimeField(auto_now_add=True)
 
     def __str__(self):
-        return f"{self.device_model.name} - Stock: {self.quantity_available}"
+        return f"Vendeur : {self.user.username}"
 
-class Sale(models.Model):
-    SALE_STATUS_CHOICES = [
-        ('pending', 'En attente'),
-        ('confirmed', 'Confirmée'),
-        ('shipped', 'Expédiée'),
-        ('delivered', 'Livrée'),
-        ('cancelled', 'Annulée'),
-    ]
-    vendeur = models.ForeignKey(Vendeur, on_delete=models.CASCADE, related_name='sales')
-    customer = models.ForeignKey(User, on_delete=models.CASCADE, related_name='purchases')
-    device_model = models.ForeignKey(DeviceModel, on_delete=models.CASCADE, related_name='sales')
-    quantity = models.IntegerField(default=1)
-    unit_price = models.DecimalField(max_digits=10, decimal_places=2)
-    total_amount = models.DecimalField(max_digits=10, decimal_places=2)
-    commission_amount = models.DecimalField(max_digits=10, decimal_places=2)
-    sale_date = models.DateTimeField(auto_now_add=True)
-    status = models.CharField(max_length=20, choices=SALE_STATUS_CHOICES, default='pending')
-    notes = models.TextField(blank=True)
-    def __str__(self): return f"Vente #{self.id} - {self.device_model.name}"
 
-class DeviceConfiguration(models.Model):
-    vendeur = models.ForeignKey(Vendeur, on_delete=models.CASCADE, related_name='device_configurations')
-    device = models.ForeignKey('IoT', on_delete=models.CASCADE, related_name='configurations')
-    configuration_type = models.CharField(max_length=50)
-    description = models.TextField()
-    configuration_data = models.JSONField(default=dict, blank=True)
-    is_resolved = models.BooleanField(default=False)
-    resolution_notes = models.TextField(blank=True)
-    created_at = models.DateTimeField(auto_now_add=True)
-    resolved_at = models.DateTimeField(null=True, blank=True)
-    def __str__(self): return f"Config {self.device.name} par {self.vendeur.company_name}"
+class ClientProfile(models.Model):
+    user = models.OneToOneField(User, on_delete=models.CASCADE, related_name='client_profile')
+    vendeur = models.ForeignKey(VendeurProfile, on_delete=models.SET_NULL, null=True, blank=True, related_name='clients')
+    espace_stockage = models.IntegerField(default=5)  # en Go
+    distance_analyse = models.FloatField(default=50.0)  # en mètres
+    date_creation = models.DateTimeField(auto_now_add=True)
 
-class IoT(models.Model):
-    user = models.ForeignKey(User, on_delete=models.CASCADE, related_name='iot_devices')
-    vendeur = models.ForeignKey(Vendeur, on_delete=models.CASCADE, related_name='sold_devices', null=True, blank=True)
-    name = models.CharField(max_length=100)
-    device_id = models.CharField(max_length=100, unique=True)
-    device_type = models.CharField(max_length=50, default='Raspberry Pi')
-    location = models.CharField(max_length=200, blank=True)
-    is_active = models.BooleanField(default=True)
-    has_issues = models.BooleanField(default=False)
-    issue_description = models.TextField(blank=True)
-    created_at = models.DateTimeField(auto_now_add=True)
-    updated_at = models.DateTimeField(auto_now=True)
-    def __str__(self): return f"{self.name} ({self.device_id})"
+    def __str__(self):
+        return f"Client : {self.user.username}"
 
-class DataSession(models.Model):
-    device = models.ForeignKey(IoT, on_delete=models.CASCADE, related_name='data_sessions')
-    session_id = models.CharField(max_length=100, unique=True)
-    start_time = models.DateTimeField(auto_now_add=True)
-    end_time = models.DateTimeField(null=True, blank=True)
-    is_active = models.BooleanField(default=True)
-    description = models.TextField(blank=True)
-    def __str__(self): return f"Session {self.session_id} - {self.device.name}"
 
-class SensorData(models.Model):
-    session = models.ForeignKey(DataSession, on_delete=models.CASCADE, related_name='sensor_data')
-    device = models.ForeignKey(IoT, on_delete=models.CASCADE, related_name='sensor_data')
-    sensor_type = models.CharField(max_length=50)
-    value = models.FloatField()
-    unit = models.CharField(max_length=20, blank=True)
-    timestamp = models.DateTimeField(auto_now_add=True)
-    gps_latitude = models.FloatField(null=True, blank=True)
-    gps_longitude = models.FloatField(null=True, blank=True)
-    additional_data = models.JSONField(default=dict, blank=True)
-    def __str__(self): return f"{self.device.name} - {self.sensor_type}: {self.value}{self.unit}"
+# ---------------------------------------------------------
+# 2️⃣ MODÈLES D’APPAREILS & INSTANCES PHYSIQUES
+# ---------------------------------------------------------
 
-class DataBatch(models.Model):
-    session = models.ForeignKey(DataSession, on_delete=models.CASCADE, related_name='data_batches')
-    device = models.ForeignKey(IoT, on_delete=models.CASCADE, related_name='data_batches')
-    batch_id = models.CharField(max_length=100, unique=True)
-    data_count = models.IntegerField(default=0)
-    created_at = models.DateTimeField(auto_now_add=True)
-    def __str__(self): return f"Batch {self.batch_id} - {self.device.name}"
+class DeviceModel(models.Model):
+    """Modèle d’appareil défini par le superuser"""
+    nom = models.CharField(max_length=100)
+    description = models.TextField(blank=True, null=True)
+    prix = models.DecimalField(max_digits=12, decimal_places=2)
+    stock = models.PositiveIntegerField(default=0)
+    vendeur = models.ForeignKey(VendeurProfile, on_delete=models.SET_NULL, null=True, blank=True, related_name='device_models')
+
+    def __str__(self):
+        return f"{self.nom} - {self.prix} USD"
+
+
+class DeviceInstance(models.Model):
+    """Instance physique d’un appareil attribuée à un client"""
+    serial = models.CharField(max_length=100, unique=True)
+    model = models.ForeignKey(DeviceModel, on_delete=models.CASCADE, related_name='instances')
+    client = models.ForeignKey(User, on_delete=models.SET_NULL, null=True, blank=True, related_name='devices')
+    date_assigned = models.DateTimeField(blank=True, null=True)
+
+    def assign_to(self, client):
+        """Assigne l’appareil à un client"""
+        self.client = client
+        self.date_assigned = timezone.now()
+        self.save()
+
+    def __str__(self):
+        return f"Appareil {self.serial} ({self.model.nom})"
+
+
+# ---------------------------------------------------------
+# 3️⃣ HISTORIQUE DES VENTES
+# ---------------------------------------------------------
+
+class Vente(models.Model):
+    vendeur = models.ForeignKey(VendeurProfile, on_delete=models.CASCADE, related_name='ventes')
+    client = models.ForeignKey(User, on_delete=models.SET_NULL, null=True, blank=True, related_name='achats')
+    device_model = models.ForeignKey(DeviceModel, on_delete=models.CASCADE)
+    quantite = models.PositiveIntegerField()
+    prix_unitaire = models.DecimalField(max_digits=12, decimal_places=2)
+    prix_total = models.DecimalField(max_digits=14, decimal_places=2)
+    date = models.DateTimeField(auto_now_add=True)
+
+    def __str__(self):
+        return f"Vente de {self.quantite} x {self.device_model.nom} par {self.vendeur.user.username}"
     
     
 # models.py — version finale adaptée à votre format LiDAR (x,y,z)
@@ -193,3 +152,28 @@ class ProfilometreLidarData(models.Model):
             models.Index(fields=['user_id', 'timestamp']),
             models.Index(fields=['has_lidar_data', 'lidar_point_count']),
         ]
+class Subscription(models.Model):
+    """
+    Modèle pour gérer les abonnements des utilisateurs
+    """
+    user = models.ForeignKey(User, on_delete=models.CASCADE, related_name='subscriptions')
+    plan_name = models.CharField(max_length=100)  # Exemple : "Basic", "Pro"
+    start_date = models.DateTimeField(auto_now_add=True)
+    end_date = models.DateTimeField(null=True, blank=True)
+    is_active = models.BooleanField(default=True)
+    max_devices = models.PositiveIntegerField(default=1)  # Nombre maximum d'appareils
+    max_distance = models.FloatField(default=50.0)       # Distance maximale autorisée pour l'analyse (ex: km)
+
+    def __str__(self):
+        return f"{self.user.email} - {self.plan_name} ({'actif' if self.is_active else 'inactif'})"
+    
+
+
+class ClientProfile(models.Model):
+    user = models.OneToOneField(User, on_delete=models.CASCADE, related_name='client_profile')
+    adresse = models.CharField(max_length=255, blank=True, null=True)
+    telephone = models.CharField(max_length=20, blank=True, null=True)
+    notes = models.TextField(blank=True, null=True)
+
+    def __str__(self):
+        return f"Profil client de {self.user.username}"
